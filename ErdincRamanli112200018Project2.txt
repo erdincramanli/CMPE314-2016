@@ -1,0 +1,150 @@
+#lang plai-typed
+(define-type msl
+  [msl-num (n : number)]
+  [msl-add (lhs : msl) (rhs : msl)]
+  [msl-sub (lhs : msl) (rhs : msl)]
+  [msl-mul (lhs : msl) (rhs : msl)]
+  [msl-div (lhs : msl) (rhs : msl)]
+  [msl-expt (lhs : msl) (rhs : msl)]
+  )
+(define (expt x y)
+  (cond
+    ((= y 0) 1)
+    (else
+     (* x (expt x (- y 1))))))
+
+(define (eval [expr : msl])
+  (type-case msl expr
+    [msl-num (n) n]
+    [msl-add (lhs rhs) (+ (eval lhs) (eval rhs))]
+    [msl-sub (lhs rhs) (- (eval lhs) (eval rhs))]
+    [msl-mul (lhs rhs) (* (eval lhs) (eval rhs))]
+    [msl-div (lhs rhs) (/ (eval lhs) (eval rhs))]
+    [msl-expt (lhs rhs) (expt (eval lhs) (eval rhs))]
+    ))
+(eval (msl-add (msl-num 42) (msl-num 23)))
+(eval (msl-add (msl-add (msl-num 42) (msl-num 23)) (msl-num 14)))
+(eval (msl-expt (msl-num 3) (msl-num 3)))
+(eval (msl-div (msl-sub (msl-num 18) (msl-num 8)) (msl-num 2)))
+
+;;Prefix Parse
+;; parse s-expression -> msl
+;; convert a quoted s expression into the equivalent msl form
+;; examples
+;; '17 -> (msl-num 17)
+;; '(+ 13 4) -> (msl-add (msl-num 13) (msl-num 4))
+(define (parse [s : s-expression]) : msl
+  (cond
+    [(s-exp-number? s) (msl-num (s-exp->number s))]
+    [(s-exp-list? s)
+     (let ([sl (s-exp->list s)])
+       (case (s-exp->symbol (first sl))
+         [(+) (msl-add (parse (second sl)) (parse (third sl)))]
+         [(-) (msl-sub (parse (second sl)) (parse (third sl)))]
+         [(*) (msl-mul (parse (second sl)) (parse (third sl)))]
+         [(/) (msl-div (parse (second sl)) (parse (third sl)))]
+         [(**) (msl-expt (parse (second sl)) (parse (third sl)))]
+         [else (error 'parse "invalid list input")]))]
+    [else (error 'parse "invalid input")]))
+;;tests for prefix parse
+(test (parse '7) (msl-num 7))
+(test (parse '(+ 3 4)) (msl-add (msl-num 3) (msl-num 4)))
+(test (parse '(+ (+ 3 4) 35)) (msl-add (msl-add (msl-num 3) (msl-num 4)) (msl-num 35)))
+(test (parse '(- (* 5 5) 10)) (msl-sub(msl-mul (msl-num 5) (msl-num 5))(msl-num 10)))
+(test (parse '(/ (** 2 5) 4)) (msl-div (msl-expt (msl-num 2) (msl-num 5)) (msl-num 4)))
+
+;;Infix Parse
+;; parseInfix s-expression -> msl
+;;convert a quoted s expression into the equivalent msl form
+;;example
+;; '7 -> (msl-num 7)
+;; '(+ 3 4) -> (msl-add (msl-num 3) (msl-num 4))
+(define (parseInfix [ s : s-expression]) : msl
+  (cond
+    [(s-exp-number? s) (msl-num (s-exp->number s))]
+    [(s-exp-list? s)
+     (let ([sl (s-exp->list s)])
+       (case (s-exp->symbol (second sl))
+         [(+) (msl-add (parseInfix (first sl)) (parseInfix (third sl)))]
+         [(-) (msl-sub (parseInfix (first sl)) (parseInfix (third sl)))]
+         [(*) (msl-mul (parseInfix (first sl)) (parseInfix (third sl)))]
+         [(/) (msl-div (parseInfix (first sl)) (parseInfix (third sl)))]
+         [(**) (msl-expt (parseInfix (first sl)) (parseInfix (third sl)))]
+         [else (error 'parse1 "invalid list input")]))]
+    [else (error 'parse1 "invalid input")]))
+
+;;tests for infix parse
+(test (parseInfix '7) (msl-num 7))
+(test (parseInfix '(3 + 4)) (msl-add (msl-num 3) (msl-num 4)))
+(test (parseInfix '( (3 + 4) + 38)) (msl-add (msl-add (msl-num 3) (msl-num 4)) (msl-num 38)))
+(test (parseInfix '((5 * 3) - 10)) (msl-sub (msl-mul (msl-num 5) (msl-num 3)) (msl-num 10)))
+(test (parseInfix '(20 / (2 ** 5))) (msl-div (msl-num 20) (msl-expt (msl-num 2) (msl-num 5))))
+(test (parseInfix '((12 + (8 * 9)) - 2)) (msl-sub (msl-add (msl-num 12) (msl-mul (msl-num 8) (msl-num 9))) (msl-num 2)))
+(test (parseInfix '(5 ** (8 / 4))) (msl-expt (msl-num 5) (msl-div (msl-num 8) (msl-num 4))))  
+
+;; output-reverse-polish msl -> list of s-expression
+;; output the msl as the reverse polish commands needed to evaluate it
+;; examples
+;; (msl-num 7) -> '(7)
+;; (msl-add (msl-num 3) (msl-num 4)) -> '(4 3 +)
+;; (msl-mul (msl-num 3) (msl-num 4)) -> '(4 3 *)
+;; (msl-add (msl-mul (msl-num 3) (msl-num 4)) (msl-num 9)) -> '(3 4 * 9 +)
+;; (msl-mul (msl-num 3) (msl-add (msl-num 4) (msl-num 9))) -> '(3 4 9 + *)
+(define (output-reverse-polish [expr : msl])
+  (type-case msl expr
+    [msl-num (n) (list (number->s-exp n))]
+    [msl-add (lhs rhs) (append (append (output-reverse-polish lhs) (output-reverse-polish rhs))
+                               (list (symbol->s-exp '+)))]
+    [msl-mul (lhs rhs) (append (append (output-reverse-polish lhs) (output-reverse-polish rhs))
+                               (list (symbol->s-exp '*)))]
+    [msl-div (lhs rhs) (append (append (output-reverse-polish lhs) (output-reverse-polish rhs))
+                               (list (symbol->s-exp '/)))]
+    [msl-sub (lhs rhs) (append (append (output-reverse-polish lhs) (output-reverse-polish rhs))
+                               (list (symbol->s-exp '-)))]
+    [msl-expt (lhs rhs) (append (append (output-reverse-polish lhs) (output-reverse-polish rhs))
+                                (list (symbol->s-exp '**)))]
+    
+    ))
+
+;;tests for unparse
+;;examples
+;;(output-reverse-polish (msl-mul (msl-num 3) (msl-num 4))) (s-exp->list '(3 4 *)))
+(test (output-reverse-polish (msl-mul (msl-num 3) (msl-num 4))) (s-exp->list '(3 4 *)))
+(test (output-reverse-polish (msl-add (msl-num 3) (msl-num 4))) (s-exp->list '(3 4 +)))
+(test (output-reverse-polish (msl-mul (msl-num 3) (msl-num 4))) (s-exp->list '(3 4 *)))
+(test (output-reverse-polish (msl-add (msl-mul (msl-num 3) (msl-num 4)) (msl-num 9))) (s-exp->list '(3 4 * 9 +)))
+(test (output-reverse-polish (msl-mul (msl-num 3) (msl-add (msl-num 4) (msl-num 9)))) (s-exp->list '(3 4 9 + *)))
+(test (output-reverse-polish (msl-sub (msl-add (msl-num 7) (msl-num 3)) (msl-num 1))) (s-exp->list '(7 3 + 1 -)))
+(test (output-reverse-polish (msl-div (msl-expt (msl-num 2) (msl-num 3)) (msl-num 3))) (s-exp->list '(2 3 ** 3 /)))
+
+;;desugaring
+;;aritC msl, arithS mslS
+(define-type mslS
+  [numS (n : number)]
+  [plusS (ls : mslS) (rs : mslS)]
+  [divS (ls : mslS) (rs : mslS)]
+  [subS (ls : mslS) (rs : mslS)]
+  [mulS (ls : mslS) (rs : mslS)]
+  [expS (ls : mslS) (rs : mslS)]
+  [uminusS (e : mslS)])
+;;convert a quoted as expression into the equivalent mslS form
+(define (desugar [as : mslS]) : msl
+  (type-case mslS as
+    [numS (n) (msl-num n)]
+    [plusS (ls rs) (msl-add (desugar ls) (desugar rs))]
+    [divS (ls rs) (msl-div (desugar ls) (desugar rs))]
+    [subS (ls rs) (msl-sub (desugar ls) (desugar rs))]
+    [mulS (ls rs) (msl-mul (desugar ls) (desugar rs))]
+    [expS (ls rs) (msl-expt (desugar ls) (desugar rs))]
+    [uminusS (e) (msl-mul (msl-num -1) (desugar e))]))
+;;tests for desugaring
+;;examples
+;;(desugar (numS 5))->(msl-num 5)
+;;(desugar (plusS (numS 3) (numS 4))->(msl-add (msl-num 3) (msl-num 4)))
+(test (desugar (numS 5)) (msl-num 5))
+(test (desugar (divS (numS 3) (numS 4))) (msl-div (msl-num 3) (msl-num 4)))
+(test (desugar (plusS (numS 3) (numS 4))) (msl-add (msl-num 3) (msl-num 4)))
+(test (desugar (expS (numS 2) (numS 2))) (msl-expt (msl-num 2) (msl-num 2)))
+(test (desugar (mulS (numS 4) (numS 7))) (msl-mul (msl-num 4) (msl-num 7)))
+(test (desugar (subS (numS 8) (numS 8))) (msl-sub (msl-num 8) (msl-num 8)))
+(test (desugar (plusS (numS 5) (numS 9))) (msl-add (msl-num 5) (msl-num 9)))
